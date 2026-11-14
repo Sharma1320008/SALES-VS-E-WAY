@@ -12,5 +12,17 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 3000,
     allowedHosts: true
+  },
+  build: {
+    chunkSizeWarningLimit: 2500,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-xlsx': ['xlsx-js-style'],
+          'vendor-icons': ['lucide-react']
+        }
+      }
+    }
   }
 });

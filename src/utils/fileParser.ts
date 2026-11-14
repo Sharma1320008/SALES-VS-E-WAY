@@ -1,5 +1,118 @@
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import { ColumnMapping, StandardInvoiceRow } from '../types/reconciliation';
+
+export const GST_STATE_CODES: Record<string, string> = {
+  '01': 'Jammu & Kashmir',
+  '02': 'Himachal Pradesh',
+  '03': 'Punjab',
+  '04': 'Chandigarh',
+  '05': 'Uttarakhand',
+  '06': 'Haryana',
+  '07': 'Delhi',
+  '08': 'Rajasthan',
+  '09': 'Uttar Pradesh',
+  '10': 'Bihar',
+  '11': 'Sikkim',
+  '12': 'Arunachal Pradesh',
+  '13': 'Nagaland',
+  '14': 'Manipur',
+  '15': 'Mizoram',
+  '16': 'Tripura',
+  '17': 'Meghalaya',
+  '18': 'Assam',
+  '19': 'West Bengal',
+  '20': 'Jharkhand',
+  '21': 'Odisha',
+  '22': 'Chhattisgarh',
+  '23': 'Madhya Pradesh',
+  '24': 'Gujarat',
+  '26': 'Dadra & Nagar Haveli and Daman & Diu',
+  '27': 'Maharashtra',
+  '29': 'Karnataka',
+  '30': 'Goa',
+  '31': 'Lakshadweep',
+  '32': 'Kerala',
+  '33': 'Tamil Nadu',
+  '34': 'Puducherry',
+  '35': 'Andaman & Nicobar Islands',
+  '36': 'Telangana',
+  '37': 'Andhra Pradesh',
+  '38': 'Ladakh',
+  '97': 'Other Territory',
+  '99': 'Center Jurisdiction'
+};
+
+export function extractGstStateCode(val: any): string | null {
+  if (val == null) return null;
+  const s = String(val).trim();
+  if (!s) return null;
+
+  // 1. Direct 2-digit code prefix (e.g. GSTIN "27AAPFU0939F1ZV" or "27-Maharashtra" or "27")
+  const match2Digit = s.match(/^(\d{2})/);
+  if (match2Digit && GST_STATE_CODES[match2Digit[1]]) {
+    return match2Digit[1];
+  }
+
+  // 2. Exact 2-digit state code word anywhere in string
+  const matchCodeAnywhere = s.match(/\b(\d{2})\b/);
+  if (matchCodeAnywhere && GST_STATE_CODES[matchCodeAnywhere[1]]) {
+    return matchCodeAnywhere[1];
+  }
+
+  // 3. Name lookup in GST_STATE_CODES
+  const lower = s.toLowerCase();
+  for (const [code, name] of Object.entries(GST_STATE_CODES)) {
+    if (lower.includes(name.toLowerCase())) {
+      return code;
+    }
+  }
+
+  return null;
+}
+
+export function getStateNameByCode(code: string | null | undefined): string | null {
+  if (!code) return null;
+  return GST_STATE_CODES[code] || null;
+}
+
+export function resolvePlaceOfSupplyWithStateName(posVal: any, gstinVal?: any): string {
+  // Extract 2-digit GST state code from POS or GSTIN
+  let code = extractGstStateCode(posVal);
+  if (!code && gstinVal) {
+    code = extractGstStateCode(gstinVal);
+  }
+
+  // Return strictly the State Name (without 2-digit state code per user requirement)
+  if (code && GST_STATE_CODES[code]) {
+    return GST_STATE_CODES[code];
+  }
+
+  // If posVal is a string (e.g. "27-Maharashtra" or "Maharashtra"), strip any leading code
+  if (posVal) {
+    const s = String(posVal).trim().replace(/^\d{1,2}\s*[-–:]\s*/, '').trim();
+    if (s && s !== 'NAN' && s !== 'undefined') {
+      const lower = s.toLowerCase();
+      for (const [, stateName] of Object.entries(GST_STATE_CODES)) {
+        if (stateName.toLowerCase() === lower || lower.includes(stateName.toLowerCase())) {
+          return stateName;
+        }
+      }
+      return s;
+    }
+  }
+
+  if (gstinVal) {
+    const s = String(gstinVal).trim().toUpperCase();
+    if (s.length >= 2) {
+      const c = s.substring(0, 2);
+      if (GST_STATE_CODES[c]) {
+        return GST_STATE_CODES[c];
+      }
+    }
+  }
+
+  return '-';
+}
 
 export const ALIASES: Record<string, string[]> = {
   invoice_no: [
@@ -7,11 +120,26 @@ export const ALIASES: Record<string, string[]> = {
     'documentno', 'billno', 'billnumber', 'invno', 'inum', 'invnum',
     'docnum', 'challanno', 'ebillno', 'document', 'invoicedocumentno'
   ],
+  party_name: [
+    'receivername', 'recipientname', 'tradename', 'legalname', 'tradelegalname',
+    'partytradelegalname', 'partyname', 'particulars', 'customername', 'buyername',
+    'consigneename', 'cname', 'lgnm', 'nameofparty', 'nameofrecipient', 'nameofreceiver',
+    'nameoftheparty', 'party', 'customer', 'buyer', 'clientname', 'billedtoname',
+    'billtoname', 'receiver', 'recipient', 'partytrade'
+  ],
   gstin: [
     // In sales reconciliation, recipient/buyer GSTIN is the key counterpart to GSTR-1 ctin
     'togstin', 'recipientgstin', 'receivergstin', 'consigneegstin', 'buyergstin',
     'gstinofrecipient', 'ctin', 'gstinuinofrecipient', 'gstin', 'gstinuin',
     'gstinnumber', 'fromgstin', 'suppliergstin', 'gstinofsupplier'
+  ],
+  from_gstin: [
+    'fromgstin', 'suppliergstin', 'gstinofsupplier', 'genbygstin', 'dispatchgstin',
+    'dispatchfromgstin', 'sellergstin', 'fromgstinuin', 'genby', 'supplygstin', 'supplier'
+  ],
+  pos: [
+    'pos', 'placeofsupply', 'tostate', 'tostatecode', 'destinationstate',
+    'stateofsupply', 'toplace', 'consigneestate', 'recipientstate', 'delivstate'
   ],
   date: [
     'invoicedate', 'documentdate', 'docdate', 'date', 'billdate', 'invdate',
@@ -19,24 +147,33 @@ export const ALIASES: Record<string, string[]> = {
   ],
   taxable: [
     'taxablevalue', 'taxableamount', 'assessablevalue', 'taxable', 'txval',
-    'taxableamt', 'totaltaxablevalue', 'assessableamt', 'totaltaxableamount'
+    'taxableamt', 'totaltaxablevalue', 'assessableamt', 'totaltaxableamount',
+    'taxableval', 'totaltaxableval', 'taxabletax', 'taxablevalues'
   ],
   igst: [
-    'igst', 'igstamount', 'iamt', 'integratedtax', 'integratedtaxamount',
-    'igstamt', 'integratedtaxamt'
+    'integratedtax', 'igst', 'integratedtaxamount', 'igstamount', 'iamt', 'igstamt',
+    'integratedtaxamt', 'inttax', 'integratedtaxvalue', 'integratedgst', 'igsttax', 'integrated'
   ],
   cgst: [
-    'cgst', 'cgstamount', 'camt', 'centraltax', 'centraltaxamount',
-    'cgstamt', 'centraltaxamt'
+    'centraltax', 'cgst', 'centraltaxamount', 'cgstamount', 'camt', 'cgstamt',
+    'centraltaxamt', 'centtax', 'centraltaxvalue', 'centralgst', 'cgsttax', 'central'
   ],
   sgst: [
-    'sgst', 'sgstamount', 'samt', 'statetax', 'statetaxamount',
-    'sgstamt', 'statetaxamt', 'utgst', 'utgstamount', 'utamt'
+    'stateuttax', 'statetax', 'sgst', 'stateut', 'stateoruttax', 'stateanduttax',
+    'sgstamount', 'samt', 'statetaxamount', 'sgstamt', 'statetaxamt', 'utgst',
+    'utgstamount', 'utamt', 'sgstuttax', 'sgstutgst', 'utstatetax', 'statetaxsgst',
+    'stateunionterritorytax', 'sgstut', 'statetaxamountsgst', 'stateuttaxamt',
+    'stateuttaxvalue', 'stateutgst', 'sutgst', 'stategst', 'utstatetaxamt'
+  ],
+  total_tax: [
+    'totaltax', 'taxamount', 'gstamount', 'totaltaxamount', 'totaltaxamt',
+    'taxamt', 'totaltaxvalue', 'gstamt', 'totalgst', 'tax', 'totaltaxamt'
   ],
   total: [
     'invoicevalue', 'invoiceamount', 'totalinvoicevalue', 'totalvalue',
     'billamount', 'totalamount', 'val', 'totinvval', 'totinvvalue',
-    'totaldocvalue', 'documentvalue', 'totalinvamount', 'grandtotal'
+    'totaldocvalue', 'documentvalue', 'totalinvamount', 'grandtotal',
+    'invval', 'invvalue', 'invoiceval'
   ],
 };
 
@@ -50,13 +187,18 @@ export function findCol(columns: string[], key: string, label?: 'GSTR-1' | 'E-Wa
     normMap.set(normCol(c), c);
   }
 
-  // If searching for GSTIN in E-Way Bill report, specifically prioritize recipient/consignee columns
+  // If searching for recipient GSTIN in E-Way Bill report, specifically prioritize recipient/consignee columns
   let aliases = ALIASES[key] || [];
   if (key === 'gstin' && label === 'E-Way Bill') {
     aliases = [
       'togstin', 'recipientgstin', 'consigneegstin', 'receivergstin', 'buyergstin',
       'gstinofrecipient', 'ctin', 'gstinuinofrecipient', 'gstin', 'gstinnumber',
       'fromgstin', 'suppliergstin'
+    ];
+  } else if (key === 'from_gstin') {
+    aliases = [
+      'fromgstin', 'suppliergstin', 'gstinofsupplier', 'genbygstin', 'dispatchgstin',
+      'sellergstin', 'fromgstinuin'
     ];
   }
 
@@ -69,6 +211,10 @@ export function findCol(columns: string[], key: string, label?: 'GSTR-1' | 'E-Wa
 
   // 2. Substring match
   for (const [norm, orig] of normMap.entries()) {
+    // If searching for buyer GSTIN, skip e-commerce GSTIN columns
+    if (key === 'gstin' && (norm.includes('ecommerce') || norm.includes('ecom'))) {
+      continue;
+    }
     for (const alias of aliases) {
       if (alias.length > 3 && norm.includes(alias)) {
         return orig;
@@ -79,9 +225,87 @@ export function findCol(columns: string[], key: string, label?: 'GSTR-1' | 'E-Wa
   return null;
 }
 
+export function autoDetectSupplierGstin(rows: any[], columns: string[] = []): string | null {
+  const fromCol = findCol(columns, 'from_gstin');
+  const counts = new Map<string, number>();
+
+  for (const row of rows) {
+    // 1. Check mapped/found column
+    if (fromCol && row[fromCol]) {
+      const g = String(row[fromCol]).trim().toUpperCase();
+      if (/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(g)) {
+        counts.set(g, (counts.get(g) || 0) + 1);
+      }
+    }
+
+    // 2. Check any property named like from_gstin, supplier, dispatch, or genby
+    for (const [k, v] of Object.entries(row)) {
+      const normK = normCol(k);
+      if (
+        normK.includes('fromgstin') ||
+        normK.includes('suppliergstin') ||
+        normK.includes('genbygstin') ||
+        normK.includes('sellergstin') ||
+        normK.includes('dispatchgstin') ||
+        normK.includes('dispatchfromgstin') ||
+        normK.includes('fromgstinuin')
+      ) {
+        const valStr = String(v ?? '').trim().toUpperCase();
+        if (/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(valStr)) {
+          counts.set(valStr, (counts.get(valStr) || 0) + 1);
+        }
+      }
+    }
+  }
+
+  let topGstin: string | null = null;
+  let topCount = 0;
+  for (const [g, count] of counts.entries()) {
+    if (count > topCount) {
+      topCount = count;
+      topGstin = g;
+    }
+  }
+
+  return topGstin;
+}
+
+/**
+ * Automatically identifies the 2-digit Supplier State Code for GST statutory classification.
+ * Checks:
+ * 1. Explicit Supplier GSTIN from file headers or columns
+ * 2. If GSTR-1 contains any intra-state transaction with CGST & SGST > 0, the recipient's state code IS the supplier's state code!
+ * 3. Fallback GSTIN prefix
+ */
+export function autoDetectSupplierStateCode(
+  rows: any[],
+  columns: string[] = [],
+  fallbackGstin?: string
+): string | null {
+  const gstin = autoDetectSupplierGstin(rows, columns) || fallbackGstin;
+  const fromGstinState = extractGstStateCode(gstin);
+  if (fromGstinState) return fromGstinState;
+
+  // Infer from Intra-State supplies: in GST statutory accounting, if CGST and SGST are charged, supplier state == recipient state!
+  for (const r of rows) {
+    const cgstVal = parseNumber(r.cgst ?? r.camt ?? r.centraltax ?? r['CGST Amount'] ?? r['CGST'] ?? 0);
+    const sgstVal = parseNumber(r.sgst ?? r.samt ?? r.statetax ?? r['SGST Amount'] ?? r['SGST'] ?? 0);
+    if (cgstVal > 0 && sgstVal > 0) {
+      const recipientGstin = r.gstin ?? r.ctin ?? r.togstin ?? r['Receiver GSTIN'] ?? r['Buyer GSTIN'] ?? '';
+      const posVal = r.pos ?? r.placeofsupply ?? r['Place of Supply'] ?? '';
+      const state = extractGstStateCode(recipientGstin) || extractGstStateCode(posVal);
+      if (state) return state;
+    }
+  }
+
+  return null;
+}
+
 export function parseGstr1Json(obj: any): any[] | null {
   const rows: any[] = [];
   if (!obj || typeof obj !== 'object') return null;
+
+  const supplierGstin = obj.gstin || '';
 
   // 1. B2B & B2BA
   for (const sectionKey of ['b2b', 'b2ba']) {
@@ -89,6 +313,7 @@ export function parseGstr1Json(obj: any): any[] | null {
     if (Array.isArray(section)) {
       for (const group of section) {
         const ctin = group?.ctin || '';
+        const cname = group?.cname || group?.party_name || group?.trade_name || group?.lgnm || group?.receiver_name || '';
         for (const inv of group?.inv || []) {
           const inum = String(inv?.inum || '').trim();
           const idt = inv?.idt || '';
@@ -113,7 +338,9 @@ export function parseGstr1Json(obj: any): any[] | null {
 
           rows.push({
             invoice_no: inum,
+            party_name: cname,
             gstin: ctin,
+            from_gstin: supplierGstin,
             date: idt,
             taxable: hasItems ? txval : null,
             igst: hasItems ? iamt : null,
@@ -154,6 +381,7 @@ export function parseGstr1Json(obj: any): any[] | null {
           rows.push({
             invoice_no: inum,
             gstin: 'URP',
+            from_gstin: supplierGstin,
             date: idt,
             taxable: hasItems ? txval : null,
             igst: hasItems ? iamt : null,
@@ -194,6 +422,7 @@ export function parseGstr1Json(obj: any): any[] | null {
           rows.push({
             invoice_no: inum,
             gstin: 'EXP',
+            from_gstin: supplierGstin,
             date: idt,
             taxable: hasItems ? txval : null,
             igst: hasItems ? iamt : null,
@@ -215,6 +444,7 @@ export function parseGstr1Json(obj: any): any[] | null {
     if (Array.isArray(section)) {
       for (const group of section) {
         const ctin = group?.ctin || '';
+        const cname = group?.cname || group?.party_name || group?.trade_name || group?.lgnm || group?.receiver_name || '';
         for (const nt of group?.nt || []) {
           const ntNum = String(nt?.nt_num || '').trim();
           const ntDt = nt?.nt_dt || '';
@@ -238,7 +468,9 @@ export function parseGstr1Json(obj: any): any[] | null {
 
           rows.push({
             invoice_no: ntNum,
+            party_name: cname,
             gstin: ctin,
+            from_gstin: supplierGstin,
             date: ntDt,
             taxable: hasItems ? txval : null,
             igst: hasItems ? iamt : null,
@@ -283,6 +515,7 @@ export function parseGstr1Json(obj: any): any[] | null {
           rows.push({
             invoice_no: ntNum,
             gstin: typ,
+            from_gstin: supplierGstin,
             date: ntDt,
             taxable: hasItems ? txval : null,
             igst: hasItems ? iamt : null,
@@ -353,7 +586,7 @@ export function genericJsonToFrames(obj: any): any[] {
 }
 
 export function findHeaderRow(matrix: any[][]): { headers: string[]; rows: any[] } {
-  const keywords = ['invoice', 'doc', 'bill', 'gstin', 'date', 'taxable', 'value', 'amount', 'total', 'rate', 'cgst', 'sgst', 'igst', 'eway', 'inum', 'ctin', 'txval'];
+  const keywords = ['invoice', 'doc', 'bill', 'gstin', 'date', 'taxable', 'value', 'amount', 'total', 'rate', 'cgst', 'sgst', 'igst', 'eway', 'inum', 'ctin', 'txval', 'central', 'integrated', 'state', 'stateuttax', 'centraltax', 'integratedtax'];
 
   let bestScore = 0;
   let bestIdx = 0;
@@ -408,6 +641,11 @@ export function findHeaderRow(matrix: any[][]): { headers: string[]; rows: any[]
 export async function parseUploadedFile(file: File): Promise<{ columns: string[]; rows: any[] }> {
   const name = file.name.toLowerCase();
   const buffer = await file.arrayBuffer();
+
+  if (name.endsWith('.pdf')) {
+    const { parsePdfFile } = await import('./pdfParser');
+    return await parsePdfFile(buffer);
+  }
 
   if (name.endsWith('.json')) {
     const text = new TextDecoder('utf-8').decode(buffer);
@@ -554,4 +792,3 @@ export function parseNumber(val: any): number {
   const num = parseFloat(cleaned);
   return isNaN(num) ? 0.0 : num;
 }
-
